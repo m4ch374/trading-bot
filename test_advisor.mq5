@@ -381,13 +381,16 @@ void process_trade_open(char trade_direction, int i) {
    double trade_sl = NULL;
    double trade_tp = NULL;
    
+   // gets the lots to trade
+   double lots = get_lots(stop_loss, i);
+   
    if (trade_direction == 'L') {
       // set sl and tp values
       trade_sl = close - stop_loss;
       trade_tp = close + take_profit;
       
       // place buy position
-      successful_order = trades.Buy(0.01, symbol_array[i], 0, trade_sl, trade_tp);
+      successful_order = trades.Buy(lots, symbol_array[i], 0, trade_sl, trade_tp);
    }
    
    if (trade_direction == 'S') {
@@ -396,7 +399,7 @@ void process_trade_open(char trade_direction, int i) {
       trade_tp = close - take_profit;
       
       // place sell position
-      successful_order = trades.Sell(0.01, symbol_array[i], 0, trade_sl, trade_tp);
+      successful_order = trades.Sell(lots, symbol_array[i], 0, trade_sl, trade_tp);
    }
    
    if (successful_order) {
@@ -569,6 +572,20 @@ double get_take_profit(int i) {
    }
 }
 
+double get_lots(double stop_loss, int i) {
+   double lots = 0;
+   if (sizing_method == Variable_Volume) {
+      double amount_at_risk = AccountInfoDouble(ACCOUNT_BALANCE) * (pos_volume/100);
+      double risk_per_pip = amount_at_risk / (stop_loss * MathPow(10, _Digits)); // convert stop loss from price to points
+      double pip_value = SymbolInfoDouble(symbol_array[i], SYMBOL_TRADE_TICK_VALUE);
+      lots = NormalizeDouble(risk_per_pip / pip_value, 2);
+   } else {
+      lots = pos_volume;
+   }
+   
+   return lots;
+}
+
 // reset some of the values of the pending trade info
 void reset_pending_trade_info(int i) {
    pending_trade[i].openTradeOrderTicket = 0;
@@ -583,5 +600,3 @@ void reset_pending_trade_info(int i) {
 // 2. CAGR/mean DD
 // 3. R2
 // 4. custom ranking system
-
-// implement position sizing method

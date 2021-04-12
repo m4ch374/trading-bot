@@ -36,6 +36,7 @@ enum Position_Sizing_Method {
 //--- custom metric selection
 enum Custom_Performance_Metric {
    Modified_Profit_Factor,
+   CAGR_Over_Mean_DD,
    No_Custom_Metric
 };
 
@@ -79,6 +80,10 @@ CTrade trades; //--- Trade instance
 int handler_ma[]; //--- Handler for MA
 int handler_atr[]; //--- Handler for ATR
 
+//--- Global variables for onTester()
+datetime backtest_first_date;
+double equity_history_array[];
+
 //--- symbol inputs
 string all_symbol_string = "EURUSD_dukascopy|EURJPY_dukascopy";
 int symbol_count;
@@ -116,6 +121,14 @@ int OnInit() {
          return(INIT_FAILED);
       }
    }
+   
+   // setup for tester
+   backtest_first_date = TimeCurrent();
+   if(MQLInfoInteger(MQL_TESTER) && metric == CAGR_Over_Mean_DD)
+   {
+      ArrayResize(equity_history_array, 1);    
+      equity_history_array[0] = AccountInfoDouble(ACCOUNT_EQUITY); 
+   } 
    
    return(INIT_SUCCEEDED);
 }
@@ -174,6 +187,12 @@ void OnTick() {
          if (trade_exit_condition_satisfied || pending_trade[i].isPendingClose) {
             process_trade_close(i);
          }
+         
+         if (MQLInfoInteger(MQL_TESTER) && metric == CAGR_Over_Mean_DD) {
+            int current_size = ArraySize(equity_history_array);
+            ArrayResize(equity_history_array, current_size + 1);  
+            equity_history_array[current_size] = AccountInfoDouble(ACCOUNT_EQUITY);
+         }
       }
       
       // If requote error is returned due to slippage (unable to enter market at price)
@@ -192,6 +211,9 @@ double OnTester() {
    
    if (metric == Modified_Profit_Factor) {
       custom_metric = get_modified_profit_factor();
+   }
+   else if (metric == CAGR_Over_Mean_DD) {
+      custom_metric = get_cagr_over_mean_dd();
    }
    else {
       custom_metric = 0;
@@ -461,7 +483,7 @@ void process_trade_close(int i) {
 double get_modified_profit_factor() {
 
    // set up required variables
-   HistorySelect(0,TimeCurrent());
+   HistorySelect(backtest_first_date, TimeCurrent());
    int number_of_deals = HistoryDealsTotal();
    
    // loop through deals in datetime order
@@ -517,6 +539,47 @@ double get_modified_profit_factor() {
    } else {
       return sum_of_profit;
    }
+}
+
+// CAGR over mean DD
+double get_cagr_over_mean_dd() {
+   double result = 0;
+
+   int number_of_data = ArraySize(equity_history_array);
+   
+   double starting_equity = equity_history_array[0];
+   double final_equity = equity_history_array[number_of_data - 1];
+   double max_equity = starting_equity;
+   double current_equity = starting_equity;
+   double sum_of_drawdown = 0;
+   
+   if (final_equity > 0) {
+      for (int i = 1; i < number_of_data; i++) {
+         current_equity = equity_history_array[i];
+            
+         if (current_equity > max_equity) {
+            max_equity = current_equity;
+         }
+            
+         sum_of_drawdown += ((max_equity - current_equity) / max_equity);
+      }
+      
+      double backtest_duration = double(TimeCurrent() - backtest_first_date);
+      backtest_duration = ((((backtest_duration / 60.0) / 60.0) / 24.0) / 365.0);
+      
+      double cagr = (MathPow((final_equity / starting_equity), (1 / backtest_duration)) - 1) * 100.0;
+      double mean_DD = 0.0;
+      
+      if(number_of_data - 1 != 0) {
+         mean_DD = (sum_of_drawdown * 100) / (number_of_data - 1);
+      }
+      
+      if(mean_DD != 0.0) {
+         result = cagr / mean_DD;
+      }
+   }
+   
+   return result;
 }
 
 //--- sub funtions
@@ -575,8 +638,7 @@ double get_take_profit(int i) {
 double get_lots(double stop_loss, int i) {
    double lots = 0;
    if (sizing_method == Variable_Volume) {
-      double amount_at_risk = AccountInfoDouble(ACCOUNT_BALANCE) * (pos_volume/100);
-      double risk_per_pip = amount_at_risk / (stop_loss * MathPow(10, _Digits)); // convert stop loss from price to points
+      double risk_per_pip = (AccountInfoDouble(ACCOUNT_BALANCE) * (pos_volume/100)) / (stop_loss * MathPow(10, _Digits)); // convert stop loss from price to points
       double pip_value = SymbolInfoDouble(symbol_array[i], SYMBOL_TRADE_TICK_VALUE);
       lots = NormalizeDouble(risk_per_pip / pip_value, 2);
    } else {
@@ -597,6 +659,6 @@ void reset_pending_trade_info(int i) {
 
 //TODO: implement custom performance metric
 // 1. Normalized PF (finished)
-// 2. CAGR/mean DD
+// 2. CAGR/mean DD (finished)
 // 3. R2
 // 4. custom ranking system

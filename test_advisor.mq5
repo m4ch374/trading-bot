@@ -37,6 +37,8 @@ enum Position_Sizing_Method {
 enum Custom_Performance_Metric {
    Modified_Profit_Factor,
    CAGR_Over_Mean_DD,
+   Corr_Of_Coeff_R,
+   Corr_Of_Deterr_R_Squared,
    No_Custom_Metric
 };
 
@@ -83,6 +85,7 @@ int handler_atr[]; //--- Handler for ATR
 //--- Global variables for onTester()
 datetime backtest_first_date;
 double equity_history_array[];
+double starting_equity;
 
 //--- symbol inputs
 string all_symbol_string = "EURUSD_dukascopy|EURJPY_dukascopy";
@@ -123,11 +126,14 @@ int OnInit() {
    }
    
    // setup for tester
-   backtest_first_date = TimeCurrent();
-   if(MQLInfoInteger(MQL_TESTER) && metric == CAGR_Over_Mean_DD)
+   if(MQLInfoInteger(MQL_TESTER))
    {
-      ArrayResize(equity_history_array, 1);    
-      equity_history_array[0] = AccountInfoDouble(ACCOUNT_EQUITY); 
+      backtest_first_date = TimeCurrent();
+      starting_equity = AccountInfoDouble(ACCOUNT_EQUITY);
+      if (metric == CAGR_Over_Mean_DD) {
+         ArrayResize(equity_history_array, 1);    
+         equity_history_array[0] = starting_equity; 
+      }
    } 
    
    return(INIT_SUCCEEDED);
@@ -188,6 +194,7 @@ void OnTick() {
             process_trade_close(i);
          }
          
+         // fill equity datas
          if (MQLInfoInteger(MQL_TESTER) && metric == CAGR_Over_Mean_DD) {
             int current_size = ArraySize(equity_history_array);
             ArrayResize(equity_history_array, current_size + 1);  
@@ -209,14 +216,26 @@ void OnTick() {
 double OnTester() {
    double custom_metric = 0;
    
-   if (metric == Modified_Profit_Factor) {
-      custom_metric = get_modified_profit_factor();
-   }
-   else if (metric == CAGR_Over_Mean_DD) {
-      custom_metric = get_cagr_over_mean_dd();
-   }
-   else {
-      custom_metric = 0;
+   switch (metric) {
+      case Modified_Profit_Factor:
+         custom_metric = get_modified_profit_factor();
+         break;
+      
+      case CAGR_Over_Mean_DD:
+         custom_metric = get_cagr_over_mean_dd();
+         break;
+      
+      case Corr_Of_Coeff_R:
+         custom_metric = get_R();
+         break;
+      
+      case Corr_Of_Deterr_R_Squared:
+         custom_metric = MathPow(get_R(), 2);
+         break;
+      
+      default:
+         custom_metric = 0;
+         break;
    }
    
    return custom_metric;
@@ -547,7 +566,6 @@ double get_cagr_over_mean_dd() {
 
    int number_of_data = ArraySize(equity_history_array);
    
-   double starting_equity = equity_history_array[0];
    double final_equity = equity_history_array[number_of_data - 1];
    double max_equity = starting_equity;
    double current_equity = starting_equity;
@@ -577,6 +595,52 @@ double get_cagr_over_mean_dd() {
       if(mean_DD != 0.0) {
          result = cagr / mean_DD;
       }
+   }
+   
+   return result;
+}
+
+double get_R() {
+   HistorySelect(backtest_first_date, TimeCurrent());
+   int number_of_deals = HistoryDealsTotal();
+   
+   int equity_count = 1;
+   
+   double equity_id[];
+   double equity[];
+   
+   ArrayResize(equity_id, equity_count);
+   ArrayResize(equity, equity_count);
+   
+   equity_id[0] = 1;
+   equity[0] = starting_equity;
+   
+   double deal_entry_commission = 0;
+   for (int i = 0; i < number_of_deals; i++) {
+      ulong deal_ticket = HistoryDealGetTicket(i);
+      
+      if (HistoryDealGetInteger(deal_ticket, DEAL_ENTRY) == DEAL_ENTRY_IN) {
+         deal_entry_commission = HistoryDealGetDouble(deal_ticket, DEAL_COMMISSION);
+      }
+      
+      if (HistoryDealGetInteger(deal_ticket, DEAL_ENTRY) == DEAL_ENTRY_OUT) {
+         equity_count++;
+         
+         double net_profit = HistoryDealGetDouble(deal_ticket, DEAL_PROFIT) + deal_entry_commission + HistoryDealGetDouble(deal_ticket, DEAL_COMMISSION) + HistoryDealGetDouble(deal_ticket, DEAL_SWAP);
+         double trade_volume = HistoryDealGetDouble(deal_ticket, DEAL_VOLUME);
+         
+         ArrayResize(equity_id, equity_count);
+         ArrayResize(equity, equity_count);
+         
+         equity_id[equity_count - 1] = equity_count;
+         equity[equity_count - 1] = equity[equity_count - 2] + (net_profit / trade_volume);
+      }
+   }
+   
+   double result = 0;
+   
+   if (!MathCorrelationPearson(equity_id, equity, result)) {
+      result = 0;
    }
    
    return result;
@@ -635,6 +699,7 @@ double get_take_profit(int i) {
    }
 }
 
+// get the lot size of the trades
 double get_lots(double stop_loss, int i) {
    double lots = 0;
    if (sizing_method == Variable_Volume) {
@@ -660,5 +725,5 @@ void reset_pending_trade_info(int i) {
 //TODO: implement custom performance metric
 // 1. Normalized PF (finished)
 // 2. CAGR/mean DD (finished)
-// 3. R2
+// 3. R2 (finished)
 // 4. custom ranking system

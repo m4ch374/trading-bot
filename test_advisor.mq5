@@ -84,7 +84,6 @@ int handler_atr[]; //--- Handler for ATR
 
 //--- Global variables for onTester()
 datetime backtest_first_date;
-double equity_history_array[];
 double starting_equity;
 
 //--- symbol inputs
@@ -130,10 +129,6 @@ int OnInit() {
    {
       backtest_first_date = TimeCurrent();
       starting_equity = AccountInfoDouble(ACCOUNT_EQUITY);
-      if (metric == CAGR_Over_Mean_DD) {
-         ArrayResize(equity_history_array, 1);    
-         equity_history_array[0] = starting_equity; 
-      }
    } 
    
    return(INIT_SUCCEEDED);
@@ -194,12 +189,6 @@ void OnTick() {
             process_trade_close(i);
          }
          
-         // fill equity datas
-         if (MQLInfoInteger(MQL_TESTER) && metric == CAGR_Over_Mean_DD) {
-            int current_size = ArraySize(equity_history_array);
-            ArrayResize(equity_history_array, current_size + 1);  
-            equity_history_array[current_size] = AccountInfoDouble(ACCOUNT_EQUITY);
-         }
       }
       
       // If requote error is returned due to slippage (unable to enter market at price)
@@ -562,37 +551,47 @@ double get_modified_profit_factor() {
 
 // CAGR over mean DD
 double get_cagr_over_mean_dd() {
-   double result = 0;
-
-   int number_of_data = ArraySize(equity_history_array);
+   HistorySelect(backtest_first_date, TimeCurrent());
+   int num_deals = HistoryDealsTotal();
    
-   double final_equity = equity_history_array[number_of_data - 1];
    double max_equity = starting_equity;
    double current_equity = starting_equity;
    double sum_of_drawdown = 0;
    
-   if (final_equity > 0) {
-      for (int i = 1; i < number_of_data; i++) {
-         current_equity = equity_history_array[i];
-            
+   double deal_entry_commission = 0;
+   int num_of_position = 1;
+   for (int i = 0; i < num_deals; i++) {
+      ulong deal_ticket = HistoryDealGetTicket(i);
+      
+      if (HistoryDealGetInteger(deal_ticket, DEAL_ENTRY) == DEAL_ENTRY_IN) {
+         deal_entry_commission = HistoryDealGetDouble(deal_ticket, DEAL_COMMISSION);
+      }
+      
+      if (HistoryDealGetInteger(deal_ticket, DEAL_ENTRY) == DEAL_ENTRY_OUT) {
+         double profit = HistoryDealGetDouble(deal_ticket, DEAL_PROFIT) + deal_entry_commission + HistoryDealGetDouble(deal_ticket, DEAL_COMMISSION) + HistoryDealGetDouble(deal_ticket, DEAL_SWAP);
+         current_equity += profit;
+         
          if (current_equity > max_equity) {
             max_equity = current_equity;
          }
-            
-         sum_of_drawdown += ((max_equity - current_equity) / max_equity);
-      }
       
+         sum_of_drawdown += ((max_equity - current_equity) / max_equity);
+         
+         num_of_position++;
+      }
+   }
+   
+   double result = 0;
+   
+   if (current_equity > 0) {
       double backtest_duration = double(TimeCurrent() - backtest_first_date);
       backtest_duration = ((((backtest_duration / 60.0) / 60.0) / 24.0) / 365.0);
       
-      double cagr = (MathPow((final_equity / starting_equity), (1 / backtest_duration)) - 1) * 100.0;
-      double mean_DD = 0.0;
+      double cagr = (MathPow((current_equity / starting_equity), (1 / backtest_duration)) - 1) * 100.0;
       
-      if(number_of_data - 1 != 0) {
-         mean_DD = (sum_of_drawdown * 100) / (number_of_data - 1);
-      }
+      double mean_DD = (sum_of_drawdown * 100) / num_of_position;
       
-      if(mean_DD != 0.0) {
+      if (mean_DD != 0) {
          result = cagr / mean_DD;
       }
    }

@@ -39,6 +39,8 @@ enum Custom_Performance_Metric {
    CAGR_Over_Mean_DD,
    Corr_Of_Coeff_R,
    Corr_Of_Deterr_R_Squared,
+   CAGR_AND_R_SQUARED,
+   MOD_PF_AND_R_SQUARED,
    No_Custom_Metric
 };
 
@@ -220,6 +222,14 @@ double OnTester() {
       
       case Corr_Of_Deterr_R_Squared:
          custom_metric = MathPow(get_R(), 2);
+         break;
+         
+      case CAGR_AND_R_SQUARED:
+         custom_metric = get_cagr_over_mean_dd() * MathPow(get_R(), 2);
+         break;
+         
+      case MOD_PF_AND_R_SQUARED:
+         custom_metric = get_modified_profit_factor() * MathPow(get_R(), 2);
          break;
       
       default:

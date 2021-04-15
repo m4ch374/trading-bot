@@ -96,6 +96,9 @@ string symbol_array[];
 // Global variable for pending trade info
 PendingTradeInfo pending_trade[];
 
+// Last bar time for every symbol
+datetime last_bar_time[];
+
 //+------------------------------------------------------------------+
 //| Expert initialization function                                   |
 //+------------------------------------------------------------------+
@@ -109,8 +112,12 @@ int OnInit() {
    // setup pending trade info data
    ArrayResize(pending_trade, symbol_count);
    setup_pending_trade();
-
-   // setup indicator data
+   
+   // setup last bar time array
+   ArrayResize(last_bar_time, symbol_count);
+   setup_last_bar_time();
+   
+   // ==================== Setup indicator data =======================
    
    // setup MA data
    ArrayResize(handler_ma, symbol_count);
@@ -125,6 +132,8 @@ int OnInit() {
          return(INIT_FAILED);
       }
    }
+   
+   //===================================================================
    
    // setup for tester
    if(MQLInfoInteger(MQL_TESTER))
@@ -168,7 +177,7 @@ void OnTick() {
       track_trade(i);
    
       // Process if a new bar is detected
-      if (is_new_bar()) {
+      if (is_new_bar(i)) {
          
          // open trade if there is trade not yet opened due to market close
          if (pending_trade[i].isPendingOpen) {
@@ -283,6 +292,14 @@ void setup_pending_trade() {
    }
 }
 
+void setup_last_bar_time() {
+   for (int i = 0; i < symbol_count; i++) {
+      last_bar_time[i] = 0;
+   }
+}
+
+//==================== Indicator setups ================================
+
 // sets up the handler for MA
 bool setup_ma_handler() {
    for (int i = 0; i < symbol_count; i++) {
@@ -321,6 +338,8 @@ bool setup_atr_handler() {
    return(true);
 }
 
+//========================================================================
+
 // check if trade hits tp or sl if there is on going trade
 void track_trade(int i) {
 
@@ -346,12 +365,11 @@ void track_trade(int i) {
 }
 
 // determine if the new tick is a new bar
-bool is_new_bar() {
-   static datetime time;
-   datetime current_time = iTime(_Symbol,_Period,0);
+bool is_new_bar(int i) {
+   datetime current_time = iTime(symbol_array[i],_Period,0);
    
-   if(time != current_time) {
-      time = current_time;
+   if(last_bar_time[i] != current_time) {
+      last_bar_time[i] = current_time;
       return(true);
    }
    else {
@@ -691,7 +709,7 @@ double get_stop_loss(int i) {
       return atr_buffer_value[1] * sl_value;
    } 
    else {
-      return ((sl_value * 10)/MathPow(10, _Digits));
+      return ((sl_value * 10)/MathPow(10, SymbolInfoInteger(symbol_array[i], SYMBOL_DIGITS)));
    }
 }
 
@@ -704,7 +722,7 @@ double get_take_profit(int i) {
       return atr_buffer_value[1] * tp_value;
    } 
    else {
-      return ((tp_value * 10)/MathPow(10, _Digits));
+      return ((tp_value * 10)/MathPow(10, SymbolInfoInteger(symbol_array[i], SYMBOL_DIGITS)));
    }
 }
 
@@ -712,7 +730,7 @@ double get_take_profit(int i) {
 double get_lots(double stop_loss, int i) {
    double lots = 0;
    if (sizing_method == Variable_Volume) {
-      double risk_per_pip = (AccountInfoDouble(ACCOUNT_BALANCE) * (pos_volume/100)) / (stop_loss * MathPow(10, _Digits)); // convert stop loss from price to points
+      double risk_per_pip = (AccountInfoDouble(ACCOUNT_BALANCE) * (pos_volume/100)) / (stop_loss * MathPow(10, SymbolInfoInteger(symbol_array[i], SYMBOL_DIGITS))); // convert stop loss from price to points
       double pip_value = SymbolInfoDouble(symbol_array[i], SYMBOL_TRADE_TICK_VALUE);
       lots = NormalizeDouble(risk_per_pip / pip_value, 2);
    } else {

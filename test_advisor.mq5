@@ -349,16 +349,30 @@ void track_trade(int i) {
       // If trade is long and hits tp or sl
       if (pending_trade[i].pendingTradeDirection == 'L') {
          double candle_close = iClose(symbol_array[i], _Period, 0);
-         if (candle_close >= pending_trade[i].pendingTradeProfit || candle_close <= pending_trade[i].pendingTradeLoss) {
-            reset_pending_trade_info(i);
+         if (pending_trade[i].pendingTradeProfit != 0) {
+            if (candle_close >= pending_trade[i].pendingTradeProfit || candle_close <= pending_trade[i].pendingTradeLoss) {
+               reset_pending_trade_info(i);
+            }
+         }
+         else {
+            if (candle_close <= pending_trade[i].pendingTradeLoss) {
+               reset_pending_trade_info(i);
+            }
          }
       }
       
       // If trade is short and hits tp or sl
       if (pending_trade[i].pendingTradeDirection == 'S') {
          double candle_close = iClose(symbol_array[i], _Period, 0);
-         if (candle_close <= pending_trade[i].pendingTradeProfit || candle_close >= pending_trade[i].pendingTradeLoss) {
-            reset_pending_trade_info(i);
+         if (pending_trade[i].pendingTradeProfit != 0) {
+            if (candle_close <= pending_trade[i].pendingTradeProfit || candle_close >= pending_trade[i].pendingTradeLoss) {
+               reset_pending_trade_info(i);
+            }
+         }
+         else {
+            if (candle_close >= pending_trade[i].pendingTradeLoss) {
+               reset_pending_trade_info(i);
+            }
          }
       }
    }
@@ -436,8 +450,8 @@ void process_trade_open(char trade_direction, int i) {
    double take_profit = get_take_profit(i);
    
    // initialize sl and tp
-   double trade_sl = NULL;
-   double trade_tp = NULL;
+   double trade_sl = 0;
+   double trade_tp = 0;
    
    // gets the lots to trade
    double lots = get_lots(stop_loss, i);
@@ -445,7 +459,10 @@ void process_trade_open(char trade_direction, int i) {
    if (trade_direction == 'L') {
       // set sl and tp values
       trade_sl = close - stop_loss;
-      trade_tp = close + take_profit;
+      
+      if (take_profit != 0) {
+         trade_tp = close + take_profit;
+      }
       
       // place buy position
       successful_order = trades.Buy(lots, symbol_array[i], 0, trade_sl, trade_tp);
@@ -454,7 +471,10 @@ void process_trade_open(char trade_direction, int i) {
    if (trade_direction == 'S') {
       // set sl and tp values
       trade_sl = close + stop_loss;
-      trade_tp = close - take_profit;
+      
+      if (take_profit != 0) {
+         trade_tp = close - take_profit;
+      }
       
       // place sell position
       successful_order = trades.Sell(lots, symbol_array[i], 0, trade_sl, trade_tp);

@@ -27,6 +27,12 @@ enum Trade_Method {
    ATR
 };
 
+//--- option select
+enum Option_Select {
+   Yes,
+   No
+};
+
 //--- position sizing method
 enum Position_Sizing_Method {
    Fixed_Volume,
@@ -74,6 +80,8 @@ input double pos_volume = 0.01; // Position Volume in Lots (Percent to risk if v
 input Trade_Method trade_methods = Fixed; // Trade method: ATR or Fixed
 input double sl_value; // ATR Stop Loss Multiplier if ATR, fixed pips if Fixed
 input double tp_value; // ATR Take Profit Multiplier if ATR, fixed pips if Fixed
+input Option_Select ts_select = Yes; // Use trailing stop?
+input double ts_value; // Trailing stop value (ATR / pips)
 
 input string dashed_line_2; // ============= Custom Performance Metric Selection =========
 input Custom_Performance_Metric metric = Modified_Profit_Factor; // Select custom metric to use
@@ -178,6 +186,8 @@ void OnTick() {
    
       // Process if a new bar is detected
       if (is_new_bar(i)) {
+         // Modifies the trade if users select trailing stop option
+         modify_trade(i);
          
          // open trade if there is trade not yet opened due to market close
          if (pending_trade[i].isPendingOpen) {
@@ -349,6 +359,7 @@ void track_trade(int i) {
       // If trade is long and hits tp or sl
       if (pending_trade[i].pendingTradeDirection == 'L') {
          double candle_close = iClose(symbol_array[i], _Period, 0);
+         
          if (pending_trade[i].pendingTradeProfit != 0) {
             if (candle_close >= pending_trade[i].pendingTradeProfit || candle_close <= pending_trade[i].pendingTradeLoss) {
                reset_pending_trade_info(i);
@@ -388,6 +399,29 @@ bool is_new_bar(int i) {
    }
    else {
       return(false);
+   }
+}
+
+void modify_trade(int i) {
+   if (pending_trade[i].openTradeOrderTicket != 0 && ts_select == Yes) {
+      double current_close = iClose(symbol_array[i], _Period, 0);
+      double previous_close = iClose(symbol_array[i], _Period, 1);
+      
+      if (pending_trade[i].pendingTradeDirection == 'L') {
+         if (current_close > previous_close) {
+            double stop_loss_magnitude = get_trailing_stop_loss(i);
+            pending_trade[i].pendingTradeLoss = current_close - stop_loss_magnitude;
+            trades.PositionModify(pending_trade[i].openTradeOrderTicket, pending_trade[i].pendingTradeLoss, pending_trade[i].pendingTradeProfit);
+         }
+      }
+      
+      if (pending_trade[i].pendingTradeDirection == 'S') {
+         if (current_close < previous_close) {
+            double stop_loss_magnitude = get_trailing_stop_loss(i);
+            pending_trade[i].pendingTradeLoss = current_close + stop_loss_magnitude;
+            trades.PositionModify(pending_trade[i].openTradeOrderTicket, pending_trade[i].pendingTradeLoss, pending_trade[i].pendingTradeProfit);
+         }
+      }
    }
 }
 
@@ -733,6 +767,18 @@ double get_stop_loss(int i) {
    }
 }
 
+double get_trailing_stop_loss(int i) {
+   if(trade_methods == ATR) {
+      double atr_buffer_value[];
+      copy_indi_array_values(handler_atr[i], 0, 0, 3, atr_buffer_value);
+      
+      return atr_buffer_value[1] * ts_value;
+   } 
+   else {
+      return ((ts_value * 10)/MathPow(10, SymbolInfoInteger(symbol_array[i], SYMBOL_DIGITS)));
+   }
+}
+
 // get the profit of the trade
 double get_take_profit(int i) {
    if(trade_methods == ATR) {
@@ -769,8 +815,4 @@ void reset_pending_trade_info(int i) {
    pending_trade[i].pendingTradeProfit = NULL;
 }
 
-//TODO: implement custom performance metric
-// 1. Normalized PF (finished)
-// 2. CAGR/mean DD (finished)
-// 3. R2 (finished)
-// 4. custom ranking system
+//TODO: implement trailing stop system

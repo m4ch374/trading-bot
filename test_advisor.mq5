@@ -27,12 +27,6 @@ enum Trade_Method {
    ATR
 };
 
-//--- option select
-enum Option_Select {
-   Yes,
-   No
-};
-
 //--- position sizing method
 enum Position_Sizing_Method {
    Fixed_Volume,
@@ -80,12 +74,11 @@ input double pos_volume = 0.01; // Position Volume in Lots (Percent to risk if v
 input Trade_Method trade_methods = Fixed; // Trade method: ATR or Fixed
 input double sl_value; // ATR Stop Loss Multiplier if ATR, fixed pips if Fixed
 input double tp_value; // ATR Take Profit Multiplier if ATR, fixed pips if Fixed
-input Option_Select ts_select = Yes; // Use trailing stop?
-input double ts_value; // Trailing stop value (ATR / pips)
+input bool ts_select = true; // Use trailing stop?
 
 input string dashed_line_2; // ============= Custom Performance Metric Selection =========
 input Custom_Performance_Metric metric = Modified_Profit_Factor; // Select custom metric to use
-input double trade_exclusion_multiple = 4; //Exclude extreme trades based on the multiple of sd
+input double trade_exclusion_multiple = 4; //Exclude extreme trades based on the multiple of SD
 
 //--- Global varables and handlers
 CTrade trades; //--- Trade instance
@@ -199,21 +192,27 @@ void OnTick() {
          char ma_exit_status = get_ma_exit_status(i);
          
          // conditions
-         bool trade_entry_condition_satisfied = (ma_entry_status == 'L' || ma_entry_status == 'S') && pending_trade[i].openTradeOrderTicket == 0;
-         bool trade_exit_condition_satisfied = (ma_exit_status == 'L' || ma_exit_status == 'S') && pending_trade[i].openTradeOrderTicket != 0;
+         bool trade_entry_condition_satisfied = ma_entry_status != 'N' && pending_trade[i].openTradeOrderTicket == 0;
+         bool trade_exit_condition_satisfied = ma_exit_status != 'N' && pending_trade[i].openTradeOrderTicket != 0;
          
          if (trade_entry_condition_satisfied && !pending_trade[i].isSlip) {
             process_trade_open(ma_entry_status, i);
          }
          
-         if (trade_exit_condition_satisfied || pending_trade[i].isPendingClose) {
+         if (trade_exit_condition_satisfied) {
             process_trade_close(i);
          }
          
       }
       
+      // If trade is pending close due to market close or 
+      // price requotes, close the trade on the next tick
+      if (pending_trade[i].isPendingClose) {
+         process_trade_close(i);
+      }
+      
       // If requote error is returned due to slippage (unable to enter market at price)
-      // Try enter in next tick
+      // Tries to enter in next tick
       if (pending_trade[i].isSlip) {
          process_trade_open(pending_trade[i].pendingTradeDirection, i);
       }
@@ -277,7 +276,7 @@ int get_symbol_count(string inputs) {
       Print("EA will process" + symbol_array[0]);
    }
    else {
-      if (inputs == "ALL"){
+      if (inputs == "ALL") {
          target_string = all_symbol_string;
       }
       else {
@@ -403,22 +402,22 @@ bool is_new_bar(int i) {
 }
 
 void modify_trade(int i) {
-   if (pending_trade[i].openTradeOrderTicket != 0 && ts_select == Yes) {
+   if (pending_trade[i].openTradeOrderTicket != 0 && ts_select == true) {
       double current_close = iClose(symbol_array[i], _Period, 0);
-      double previous_close = iClose(symbol_array[i], _Period, 1);
+      double previous_close = iOpen(symbol_array[i], _Period, 1);
       
       if (pending_trade[i].pendingTradeDirection == 'L') {
          if (current_close > previous_close) {
-            double stop_loss_magnitude = get_trailing_stop_loss(i);
-            pending_trade[i].pendingTradeLoss = current_close - stop_loss_magnitude;
+            double magnitude = current_close - previous_close;
+            pending_trade[i].pendingTradeLoss += magnitude;
             trades.PositionModify(pending_trade[i].openTradeOrderTicket, pending_trade[i].pendingTradeLoss, pending_trade[i].pendingTradeProfit);
          }
       }
       
       if (pending_trade[i].pendingTradeDirection == 'S') {
          if (current_close < previous_close) {
-            double stop_loss_magnitude = get_trailing_stop_loss(i);
-            pending_trade[i].pendingTradeLoss = current_close + stop_loss_magnitude;
+            double magnitude = current_close - previous_close;
+            pending_trade[i].pendingTradeLoss -= magnitude;
             trades.PositionModify(pending_trade[i].openTradeOrderTicket, pending_trade[i].pendingTradeLoss, pending_trade[i].pendingTradeProfit);
          }
       }
@@ -430,11 +429,11 @@ char get_ma_entry_status(int i) {
 
    // gets ma value
    double ma_value_buffer[];
-   bool ma_buffer_success = copy_indi_array_values(handler_ma[i],0,1,3,ma_value_buffer);
+   bool ma_buffer_success = copy_indi_array_values(handler_ma[i],0,1,2,ma_value_buffer);
    
    // get candle rates
    MqlRates candle[];
-   bool candle_buffer_success = get_candle_rates(symbol_array[i], _Period, 1, 3, candle);
+   bool candle_buffer_success = get_candle_rates(symbol_array[i], _Period, 1, 2, candle);
    
    bool no_buffer_errors = ma_buffer_success && candle_buffer_success;
    
@@ -560,7 +559,7 @@ void process_trade_close(int i) {
       uint result_code = trades.ResultRetcode();
    
       // if unable to close position due to market close
-      if (result_code == 10018) {
+      if (result_code == 10018 || result_code == 10004) {
          pending_trade[i].isPendingClose = true;
       }
       
@@ -640,6 +639,7 @@ double get_cagr_over_mean_dd() {
    double current_equity = starting_equity;
    double sum_of_drawdown = 0;
    
+   // loop through deals in date time order
    double deal_entry_commission = 0;
    int num_of_position = 1;
    for (int i = 0; i < num_deals; i++) {
@@ -667,6 +667,8 @@ double get_cagr_over_mean_dd() {
    
    if (current_equity > 0) {
       double backtest_duration = double(TimeCurrent() - backtest_first_date);
+      
+      // convert duration to years
       backtest_duration = ((((backtest_duration / 60.0) / 60.0) / 24.0) / 365.0);
       
       double cagr = (MathPow((current_equity / starting_equity), (1 / backtest_duration)) - 1) * 100.0;
@@ -681,6 +683,7 @@ double get_cagr_over_mean_dd() {
    return result;
 }
 
+// get R value
 double get_R() {
    HistorySelect(backtest_first_date, TimeCurrent());
    int number_of_deals = HistoryDealsTotal();
@@ -696,6 +699,7 @@ double get_R() {
    equity_id[0] = 1;
    equity[0] = starting_equity;
    
+   // loop through trades and calculate R value
    double deal_entry_commission = 0;
    for (int i = 0; i < number_of_deals; i++) {
       ulong deal_ticket = HistoryDealGetTicket(i);
@@ -764,18 +768,6 @@ double get_stop_loss(int i) {
    } 
    else {
       return ((sl_value * 10)/MathPow(10, SymbolInfoInteger(symbol_array[i], SYMBOL_DIGITS)));
-   }
-}
-
-double get_trailing_stop_loss(int i) {
-   if(trade_methods == ATR) {
-      double atr_buffer_value[];
-      copy_indi_array_values(handler_atr[i], 0, 0, 3, atr_buffer_value);
-      
-      return atr_buffer_value[1] * ts_value;
-   } 
-   else {
-      return ((ts_value * 10)/MathPow(10, SymbolInfoInteger(symbol_array[i], SYMBOL_DIGITS)));
    }
 }
 

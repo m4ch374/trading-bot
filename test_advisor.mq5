@@ -48,6 +48,7 @@ enum Custom_Performance_Metric {
 struct PendingTradeInfo {
    // Pending trade data
    ulong openTradeOrderTicket;
+   double pendingTradeEnterPrice;
    double pendingTradeLoss;
    double pendingTradeProfit;
    char pendingTradeDirection;
@@ -57,6 +58,7 @@ struct PendingTradeInfo {
    bool isPendingClose;
    bool isPendingOpen;
    bool isSlip;
+   bool isSlipClose;
 };
 
 //--- input parameters
@@ -176,9 +178,20 @@ void OnTick() {
    for (int i = 0; i < symbol_count; i++) {
       // If there is on going trade, check if it hits tp or sl
       track_trade(i);
+      
+      if (pending_trade[i].isSlipClose) {
+         process_trade_close(i);
+      }
+      
+      // If requote error is returned due to slippage (unable to enter market at price)
+      // Tries to enter in next tick
+      if (pending_trade[i].isSlip) {
+         process_trade_open(pending_trade[i].pendingTradeDirection, i);
+      }
    
       // Process if a new bar is detected
       if (is_new_bar(i)) {
+      
          // Modifies the trade if users select trailing stop option
          modify_trade(i);
          
@@ -199,22 +212,9 @@ void OnTick() {
             process_trade_open(ma_entry_status, i);
          }
          
-         if (trade_exit_condition_satisfied) {
+         if (trade_exit_condition_satisfied || pending_trade[i].isPendingClose) {
             process_trade_close(i);
          }
-         
-      }
-      
-      // If trade is pending close due to market close or 
-      // price requotes, close the trade on the next tick
-      if (pending_trade[i].isPendingClose) {
-         process_trade_close(i);
-      }
-      
-      // If requote error is returned due to slippage (unable to enter market at price)
-      // Tries to enter in next tick
-      if (pending_trade[i].isSlip) {
-         process_trade_open(pending_trade[i].pendingTradeDirection, i);
       }
    }
 }
@@ -292,12 +292,14 @@ int get_symbol_count(string inputs) {
 void setup_pending_trade() {
    for (int i = 0; i < symbol_count; i++) {
       pending_trade[i].openTradeOrderTicket = 0;
+      pending_trade[i].pendingTradeEnterPrice = NULL;
       pending_trade[i].pendingTradeLoss = NULL;
       pending_trade[i].pendingTradeProfit = NULL;
       pending_trade[i].pendingTradeDirection = 0;
       pending_trade[i].isPendingClose = false;
       pending_trade[i].isPendingOpen = false;
       pending_trade[i].isSlip = false;
+      pending_trade[i].isSlipClose = false;
    }
 }
 
@@ -382,6 +384,7 @@ void track_trade(int i) {
          else {
             if (candle_close >= pending_trade[i].pendingTradeLoss) {
                reset_pending_trade_info(i);
+               Print("YES");
             }
          }
       }
@@ -401,24 +404,27 @@ bool is_new_bar(int i) {
    }
 }
 
+//todo: not previous close but enter price
 void modify_trade(int i) {
    if (pending_trade[i].openTradeOrderTicket != 0 && ts_select == true) {
       double current_close = iClose(symbol_array[i], _Period, 0);
-      double previous_close = iOpen(symbol_array[i], _Period, 1);
+      double previous_price = pending_trade[i].pendingTradeEnterPrice;
       
       if (pending_trade[i].pendingTradeDirection == 'L') {
-         if (current_close > previous_close) {
-            double magnitude = current_close - previous_close;
+         if (current_close > previous_price) {
+            double magnitude = current_close - previous_price;
             pending_trade[i].pendingTradeLoss += magnitude;
             trades.PositionModify(pending_trade[i].openTradeOrderTicket, pending_trade[i].pendingTradeLoss, pending_trade[i].pendingTradeProfit);
+            pending_trade[i].pendingTradeEnterPrice = current_close;
          }
       }
       
       if (pending_trade[i].pendingTradeDirection == 'S') {
-         if (current_close < previous_close) {
-            double magnitude = current_close - previous_close;
-            pending_trade[i].pendingTradeLoss -= magnitude;
+         if (current_close < previous_price) {
+            double magnitude = current_close - previous_price;
+            pending_trade[i].pendingTradeLoss += magnitude;
             trades.PositionModify(pending_trade[i].openTradeOrderTicket, pending_trade[i].pendingTradeLoss, pending_trade[i].pendingTradeProfit);
+            pending_trade[i].pendingTradeEnterPrice = current_close;
          }
       }
    }
@@ -516,8 +522,8 @@ void process_trade_open(char trade_direction, int i) {
    if (successful_order) {
    
       // Set trading info
-      Print("Order successful");
       pending_trade[i].openTradeOrderTicket = trades.ResultOrder();
+      pending_trade[i].pendingTradeEnterPrice = trades.ResultPrice();
       pending_trade[i].pendingTradeLoss = trade_sl;
       pending_trade[i].pendingTradeProfit = trade_tp;
       pending_trade[i].pendingTradeDirection = trade_direction;
@@ -525,6 +531,8 @@ void process_trade_open(char trade_direction, int i) {
       // reset pending trade properties
       pending_trade[i].isPendingOpen = false;
       pending_trade[i].isSlip = false;
+      
+      Print("Order successful");
    }
    else {
       // Gets the result code
@@ -559,8 +567,13 @@ void process_trade_close(int i) {
       uint result_code = trades.ResultRetcode();
    
       // if unable to close position due to market close
-      if (result_code == 10018 || result_code == 10004) {
+      if (result_code == 10018) {
          pending_trade[i].isPendingClose = true;
+      }
+      
+      // if unable to close due to price requotes
+      if (result_code == 10004) {
+         pending_trade[i].isSlipClose = true;
       }
       
       Print("Exit unsuccessful: ", result_code);
@@ -801,10 +814,14 @@ double get_lots(double stop_loss, int i) {
 // reset some of the values of the pending trade info
 void reset_pending_trade_info(int i) {
    pending_trade[i].openTradeOrderTicket = 0;
+   pending_trade[i].pendingTradeEnterPrice = NULL;
    pending_trade[i].isPendingClose = false;
+   pending_trade[i].isPendingOpen = false;
    pending_trade[i].pendingTradeDirection = 0;
    pending_trade[i].pendingTradeLoss = NULL;
    pending_trade[i].pendingTradeProfit = NULL;
+   pending_trade[i].isSlip = false;
+   pending_trade[i].isSlipClose = false;
 }
 
 //TODO: implement trailing stop system

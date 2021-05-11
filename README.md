@@ -1,2 +1,2 @@
 # trading-bot
-a simple trading bot project
+a simple backtest EA based off of MA

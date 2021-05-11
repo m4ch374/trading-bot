@@ -9,6 +9,7 @@
 
 //--- libraries
 #include <Trade\Trade.mqh>
+#include <Trade\DealInfo.mqh>
 #include <Math\Stat\Stat.mqh>
 
 //--- enums
@@ -84,6 +85,7 @@ input double trade_exclusion_multiple = 4; //Exclude extreme trades based on the
 
 //--- Global varables and handlers
 CTrade trades; //--- Trade instance
+CDealInfo deals; //--- Deal infos for TP and SL hit detection
 int handler_ma[]; //--- Handler for MA
 int handler_atr[]; //--- Handler for ATR
 
@@ -176,8 +178,6 @@ void OnTick() {
 //---
    // loop through all instuments for each new tick
    for (int i = 0; i < symbol_count; i++) {
-      // If there is on going trade, check if it hits tp or sl
-      track_trade(i);
       
       if (pending_trade[i].isSlipClose) {
          process_trade_close(i);
@@ -214,6 +214,37 @@ void OnTick() {
          
          if (trade_exit_condition_satisfied || pending_trade[i].isPendingClose) {
             process_trade_close(i);
+         }
+      }
+   }
+}
+
+//+------------------------------------------------------------------+
+//| Expert trade transaction                                         |
+//+------------------------------------------------------------------+
+void OnTradeTransaction(const MqlTradeTransaction& trans, const MqlTradeRequest& request, const MqlTradeResult& result) {
+                        
+   //--- get transaction type as enumeration value
+   ENUM_TRADE_TRANSACTION_TYPE type = trans.type;
+   
+   //--- if transaction is result of addition of the transaction in history
+   if(type==TRADE_TRANSACTION_DEAL_ADD) {
+      if(HistoryDealSelect(trans.deal)) {
+         deals.Ticket(trans.deal);
+         
+         long reason=-1;
+         if(deals.InfoInteger(DEAL_REASON,reason)) {
+            if((ENUM_DEAL_REASON)reason==DEAL_REASON_SL) {
+               int i = get_symbol_index(deals.Symbol());
+               reset_pending_trade_info(i);
+               Print("Pending trade info has been reset");
+            }
+            
+            if((ENUM_DEAL_REASON)reason==DEAL_REASON_TP) {
+               int i = get_symbol_index(deals.Symbol());
+               reset_pending_trade_info(i);
+               Print("Pending trade info has been reset");
+            }
          }
       }
    }
@@ -350,46 +381,6 @@ bool setup_atr_handler() {
 }
 
 //========================================================================
-
-// check if trade hits tp or sl if there is on going trade
-void track_trade(int i) {
-
-   // process if there is on going trade
-   if (pending_trade[i].openTradeOrderTicket != 0) {
-            
-      // If trade is long and hits tp or sl
-      if (pending_trade[i].pendingTradeDirection == 'L') {
-         double candle_close = iClose(symbol_array[i], _Period, 0);
-         
-         if (pending_trade[i].pendingTradeProfit != 0) {
-            if (candle_close >= pending_trade[i].pendingTradeProfit || candle_close <= pending_trade[i].pendingTradeLoss) {
-               reset_pending_trade_info(i);
-            }
-         }
-         else {
-            if (candle_close <= pending_trade[i].pendingTradeLoss) {
-               reset_pending_trade_info(i);
-            }
-         }
-      }
-      
-      // If trade is short and hits tp or sl
-      if (pending_trade[i].pendingTradeDirection == 'S') {
-         double candle_close = iClose(symbol_array[i], _Period, 0);
-         if (pending_trade[i].pendingTradeProfit != 0) {
-            if (candle_close <= pending_trade[i].pendingTradeProfit || candle_close >= pending_trade[i].pendingTradeLoss) {
-               reset_pending_trade_info(i);
-            }
-         }
-         else {
-            if (candle_close >= pending_trade[i].pendingTradeLoss) {
-               reset_pending_trade_info(i);
-               Print("YES");
-            }
-         }
-      }
-   }
-}
 
 // determine if the new tick is a new bar
 bool is_new_bar(int i) {
@@ -746,6 +737,19 @@ double get_R() {
 
 //--- sub funtions
 
+// get the index of symbol array from symbol name
+int get_symbol_index(string symbol_name) {
+   int i = 0;
+   while (i < symbol_count) {
+      if (symbol_array[i] == symbol_name) {
+         break;
+      }
+      i++;
+   }
+   
+   return i;
+}
+
 // get the MQLrates and check if it successfully return it
 bool get_candle_rates(string symbol_name, ENUM_TIMEFRAMES timeframe, int start_pos, int count, MqlRates &rates[]) {
    // setup candle values
@@ -823,5 +827,3 @@ void reset_pending_trade_info(int i) {
    pending_trade[i].isSlip = false;
    pending_trade[i].isSlipClose = false;
 }
-
-//TODO: implement trailing stop system

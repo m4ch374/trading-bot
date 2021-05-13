@@ -228,19 +228,19 @@ void OnTradeTransaction(const MqlTradeTransaction& trans, const MqlTradeRequest&
    ENUM_TRADE_TRANSACTION_TYPE type = trans.type;
    
    //--- if transaction is result of addition of the transaction in history
-   if(type==TRADE_TRANSACTION_DEAL_ADD) {
+   if(type == TRADE_TRANSACTION_DEAL_ADD) {
       if(HistoryDealSelect(trans.deal)) {
          deals.Ticket(trans.deal);
          
-         long reason=-1;
+         long reason = -1;
          if(deals.InfoInteger(DEAL_REASON,reason)) {
-            if((ENUM_DEAL_REASON)reason==DEAL_REASON_SL) {
+            if((ENUM_DEAL_REASON)reason == DEAL_REASON_SL) {
                int i = get_symbol_index(deals.Symbol());
                reset_pending_trade_info(i);
                Print("Pending trade info has been reset");
             }
             
-            if((ENUM_DEAL_REASON)reason==DEAL_REASON_TP) {
+            if((ENUM_DEAL_REASON)reason == DEAL_REASON_TP) {
                int i = get_symbol_index(deals.Symbol());
                reset_pending_trade_info(i);
                Print("Pending trade info has been reset");

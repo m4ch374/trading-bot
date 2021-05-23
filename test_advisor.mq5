@@ -583,6 +583,11 @@ void process_trade_close(int i) {
 void output_csv_file() {
    string file_name = "deal_logs.csv";
    int file_handler = FileOpen(file_name, FILE_WRITE|FILE_CSV|FILE_COMMON, "\t");
+   
+   // writes the start and end date
+   FileWrite(file_handler, IntegerToString((int)(TimeCurrent() - backtest_first_date)));
+   
+   // writes the initial balance
    FileWrite(file_handler, DoubleToString(starting_equity, 2), 0, 0);
    
    HistorySelect(backtest_first_date, TimeCurrent());

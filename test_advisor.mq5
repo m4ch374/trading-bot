@@ -583,7 +583,7 @@ void process_trade_close(int i) {
 void output_csv_file() {
    string file_name = "deal_logs.csv";
    int file_handler = FileOpen(file_name, FILE_WRITE|FILE_CSV|FILE_COMMON, "\t");
-   FileWrite(file_handler, starting_equity, 0);
+   FileWrite(file_handler, DoubleToString(starting_equity, 2), 0, 0);
    
    HistorySelect(backtest_first_date, TimeCurrent());
    int total_deals = HistoryDealsTotal();
@@ -598,8 +598,9 @@ void output_csv_file() {
       }
    
       if (HistoryDealGetInteger(deal_ticket, DEAL_ENTRY) == DEAL_ENTRY_OUT) {
-         balance += HistoryDealGetDouble(deal_ticket,DEAL_PROFIT) + deal_entry_commission + HistoryDealGetDouble(deal_ticket,DEAL_SWAP) + HistoryDealGetDouble(deal_ticket,DEAL_COMMISSION);
-         FileWrite(file_handler, DoubleToString(balance, 2), DoubleToString(HistoryDealGetDouble(deal_ticket, DEAL_VOLUME), 2));
+         double net_profit = HistoryDealGetDouble(deal_ticket,DEAL_PROFIT) + deal_entry_commission + HistoryDealGetDouble(deal_ticket,DEAL_SWAP) + HistoryDealGetDouble(deal_ticket,DEAL_COMMISSION);
+         balance += net_profit;
+         FileWrite(file_handler, DoubleToString(balance, 2), DoubleToString(net_profit, 2), DoubleToString(HistoryDealGetDouble(deal_ticket, DEAL_VOLUME), 2));
       }
    }
    

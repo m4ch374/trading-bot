@@ -83,6 +83,9 @@ input string dashed_line_2; // ============= Custom Performance Metric Selection
 input Custom_Performance_Metric metric = Modified_Profit_Factor; // Select custom metric to use
 input double trade_exclusion_multiple = 4; //Exclude extreme trades based on the multiple of SD
 
+input string dashed_line_3; // ============= Other Controls ================
+input bool output_csv = false; // Output CSV file?
+
 //--- Global varables and handlers
 CTrade trades; //--- Trade instance
 CDealInfo deals; //--- Deal infos for TP and SL hit detection
@@ -254,6 +257,11 @@ void OnTradeTransaction(const MqlTradeTransaction& trans, const MqlTradeRequest&
 //| Expert tester function                                           |
 //+------------------------------------------------------------------+
 double OnTester() {
+   
+   if (output_csv == true) {
+      output_csv_file();
+   }
+
    double custom_metric = 0;
    
    switch (metric) {
@@ -569,6 +577,33 @@ void process_trade_close(int i) {
       
       Print("Exit unsuccessful: ", result_code);
    }
+}
+
+// Outputs CSV file
+void output_csv_file() {
+   string file_name = "deal_logs.csv";
+   int file_handler = FileOpen(file_name, FILE_WRITE|FILE_CSV|FILE_COMMON, "\t");
+   FileWrite(file_handler, starting_equity, 0);
+   
+   HistorySelect(backtest_first_date, TimeCurrent());
+   int total_deals = HistoryDealsTotal();
+   double deal_entry_commission = 0;
+   double balance = starting_equity;
+   
+   for (int i = 0; i < total_deals; i++) {
+      ulong deal_ticket = HistoryDealGetTicket(i);
+   
+      if (HistoryDealGetInteger(deal_ticket, DEAL_ENTRY) == DEAL_ENTRY_IN) {
+         deal_entry_commission = HistoryDealGetDouble(deal_ticket, DEAL_COMMISSION);
+      }
+   
+      if (HistoryDealGetInteger(deal_ticket, DEAL_ENTRY) == DEAL_ENTRY_OUT) {
+         balance += HistoryDealGetDouble(deal_ticket,DEAL_PROFIT) + deal_entry_commission + HistoryDealGetDouble(deal_ticket,DEAL_SWAP) + HistoryDealGetDouble(deal_ticket,DEAL_COMMISSION);
+         FileWrite(file_handler, DoubleToString(balance, 2), DoubleToString(HistoryDealGetDouble(deal_ticket, DEAL_VOLUME), 2));
+      }
+   }
+   
+   Print("CSV outputted");
 }
 
 // Modified profit factor that normalizes position size
